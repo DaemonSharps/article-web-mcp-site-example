@@ -1,0 +1,23 @@
+{
+  "name": "signal-store-webmcp-demo",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "vite": "^8.2.2"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}
