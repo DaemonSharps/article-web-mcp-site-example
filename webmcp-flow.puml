@@ -14,9 +14,11 @@ skinparam sequence {
 }
 
 actor "Пользователь" as User
-participant "AI-агент" as Agent
+participant "ИИ-агент" as Agent
 participant "Браузер" as Browser
 participant "React" as React #a3e635
+database "Состояние React" as State #cfeefb
+database "Серверный API" as Api #ffe0d4
 
 note over User, React
   WebMCP оставляет человека, агента и интерфейс
