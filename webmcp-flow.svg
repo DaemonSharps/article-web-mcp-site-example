@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="680" viewBox="0 0 1200 680" role="img" aria-labelledby="title desc">
+  <title id="title">Схема вызова WebMCP-инструмента</title>
+  <desc id="desc">Пользователь формулирует задачу агенту, агент обнаруживает инструмент через браузер, браузер вызывает React-обработчик, а страница обновляет интерфейс и обращается к API.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#171815"/></marker>
+    <style>
+      .title { font: 700 34px Arial, sans-serif; fill: #171815; }
+      .label { font: 700 20px Arial, sans-serif; fill: #171815; }
+      .small { font: 400 16px Arial, sans-serif; fill: #4b4d46; }
+      .step { font: 700 14px monospace; fill: #171815; }
+      .code { font: 700 15px monospace; fill: #f7f6f1; }
+      .line { stroke: #171815; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1200" height="680" rx="28" fill="#f2f0e9"/>
+  <text class="title" x="60" y="68">Один запрос вместо экскурсии по DOM</text>
+  <text class="small" x="60" y="98">WebMCP оставляет человека, агента и интерфейс в одном контексте вкладки</text>
+  <rect x="60" y="155" width="230" height="118" rx="18" fill="#ffffff" stroke="#171815" stroke-width="2"/>
+  <circle cx="102" cy="196" r="18" fill="#ff6b35"/><text class="step" x="96" y="201">1</text><text class="label" x="132" y="200">Пользователь</text>
+  <text class="small" x="88" y="238">«Найди наушники</text><text class="small" x="88" y="260">до 10 000 рублей»</text>
+  <rect x="365" y="155" width="230" height="118" rx="18" fill="#ffffff" stroke="#171815" stroke-width="2"/>
+  <circle cx="407" cy="196" r="18" fill="#38bdf8"/><text class="step" x="401" y="201">2</text><text class="label" x="437" y="200">AI-агент</text>
+  <text class="small" x="393" y="238">Выбирает tool и</text><text class="small" x="393" y="260">собирает аргументы</text>
+  <rect x="670" y="155" width="230" height="118" rx="18" fill="#171815" stroke="#171815" stroke-width="2"/>
+  <circle cx="712" cy="196" r="18" fill="#a3e635"/><text class="step" x="706" y="201">3</text><text x="742" y="200" style="font:700 20px Arial,sans-serif;fill:#fff">Браузер</text>
+  <text class="code" x="698" y="238">search_products</text><text x="698" y="260" style="font:400 14px monospace;fill:#a3e635">{ maxPrice: 10000 }</text>
+  <rect x="975" y="155" width="165" height="118" rx="18" fill="#a3e635" stroke="#171815" stroke-width="2"/>
+  <circle cx="1017" cy="196" r="18" fill="#ffffff"/><text class="step" x="1011" y="201">4</text><text class="label" x="1047" y="200">React</text>
+  <text class="small" x="1002" y="238">Тот же handler,</text><text class="small" x="1002" y="260">что у кнопки</text>
+  <path class="line" d="M290 214H355"/><path class="line" d="M595 214H660"/><path class="line" d="M900 214H965"/>
+  <text class="step" x="304" y="196">PROMPT</text><text class="step" x="609" y="196">DISCOVERY</text><text class="step" x="914" y="196">EXECUTE</text>
+  <rect x="670" y="380" width="470" height="150" rx="22" fill="#ffffff" stroke="#171815" stroke-width="2"/>
+  <text class="label" x="710" y="425">Обычная логика приложения</text>
+  <rect x="710" y="451" width="160" height="48" rx="10" fill="#cfeefb"/><text class="small" x="742" y="481">Состояние React</text>
+  <rect x="900" y="451" width="190" height="48" rx="10" fill="#ffe0d4"/><text class="small" x="945" y="481">Серверный API</text>
+  <path class="line" d="M1058 273V370"/>
+  <rect x="60" y="580" width="1080" height="52" rx="12" fill="#171815"/>
+  <text x="90" y="613" style="font:700 17px monospace;fill:#a3e635">РЕЗУЛЬТАТ</text><text x="190" y="613" style="font:400 17px Arial,sans-serif;fill:#fff">агент получает структурированные данные, пользователь видит обновлённый интерфейс</text>
+  <path class="line" d="M670 455C450 455 450 606 300 606"/>
+</svg>

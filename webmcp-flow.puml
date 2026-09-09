@@ -1,0 +1,51 @@
+@startuml webmcp-flow
+skinparam backgroundColor #f2f0e9
+skinparam sequence {
+    MessageAlign center
+    MaxMessageSize 240
+    ParticipantPadding 40
+    BoxPadding 12
+    ArrowColor #171815
+    ArrowThickness 2
+    LifeLineBorderColor #171815
+    LifeLineBackgroundColor #ffffff
+    ParticipantBorderColor #171815
+    ParticipantBackgroundColor #ffffff
+}
+
+actor "Пользователь" as User
+participant "AI-агент" as Agent
+participant "Браузер" as Browser
+participant "React" as React #a3e635
+
+note over User, React
+  WebMCP оставляет человека, агента и интерфейс
+  в одном контексте вкладки
+end note
+
+== Шаг 1. Запрос ==
+User -> Agent: «Найди наушники до 10 000 рублей»
+== Шаг 2. Обнаружение ==
+Agent -> Browser: обнаружение инструмента\nsearch_products
+== Шаг 3. Выполнение ==
+Browser -> React: search_products\n{ maxPrice: 10000 }
+activate React
+note over React
+  Тот же обработчик, что у кнопки:
+  общие фильтры, состояние и сетка товаров
+end note
+== Шаг 4. Логика приложения ==
+React -> State: обновить фильтры
+State --> React: отфильтрованный каталог
+React -> Api: запрос при необходимости
+Api --> React: ответ
+== Шаг 5. Результат ==
+React --> Browser: структурированные данные\n{ count, products }
+deactivate React
+Browser --> Agent: результат вызова
+Agent --> User: ответ пользователю
+note over User, React
+  Пользователь видит обновлённый интерфейс,
+  агент получает стабильные идентификаторы товаров
+end note
+@enduml
