@@ -1,474 +1,87 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { flushSync } from 'react-dom';
-import { categories, formatPrice, getCategoryLabel, products } from './products.js';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { api } from './api.js';
+import { categories, formatPrice, getCategoryLabel } from './products.js';
 import { useWebMcpTools } from './useWebMcpTools.js';
 
-const initialFilters = {
-  query: '',
-  category: 'all',
-  maxPrice: '',
-  inStockOnly: false,
-};
+const emptyFilters = { query: '', category: 'all', maxPrice: '', inStockOnly: false };
+const statuses = { draft: 'Черновик', published: 'Опубликован', archived: 'Архив', open_cart: 'Открыта', abandoned: 'Брошена', submitted: 'Оформлен', completed: 'Выполнен', cancelled: 'Отменён' };
+const price = (n) => formatPrice(Number(n || 0));
+const available = (p) => Math.max(0, (p.stock || 0) - (p.reservedStock || 0));
 
-function matchesFilters(product, filters) {
-  const query = filters.query.trim().toLocaleLowerCase('ru-RU');
-  const searchableText = [product.name, product.description, ...product.tags]
-    .join(' ')
-    .toLocaleLowerCase('ru-RU');
-  const maxPrice = filters.maxPrice === '' ? Number.POSITIVE_INFINITY : Number(filters.maxPrice);
+function ProductArt({ product, large = false }) { return <div className={`product-art ${large ? 'product-art--large' : ''}`} style={{ '--accent': product.accent || '#a3e635' }} aria-hidden="true"><span>{product.mark || 'SS'}</span><i /></div>; }
+function ErrorBox({ error, retry }) { return error ? <div className="error-box" role="alert"><strong>Сигнал потерян</strong><span>{error}</span>{retry && <button onClick={retry}>Повторить</button>}</div> : null; }
+function Loading() { return <div className="loading"><i /> Загружаем данные</div>; }
 
-  return (
-    (!query || searchableText.includes(query)) &&
-    (filters.category === 'all' || product.category === filters.category) &&
-    product.price <= maxPrice &&
-    (!filters.inStockOnly || product.stock > 0)
-  );
-}
-
-function ProductArt({ product, large = false }) {
-  return (
-    <div
-      className={`product-art ${large ? 'product-art--large' : ''}`}
-      style={{ '--accent': product.accent }}
-      aria-hidden="true"
-    >
-      <span>{product.mark}</span>
-      <i />
-    </div>
-  );
-}
-
-export default function App() {
-  const [filters, setFilters] = useState(initialFilters);
-  const [cart, setCart] = useState({});
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const [cartOpen, setCartOpen] = useState(false);
-  const [notice, setNotice] = useState('');
-  const cartRef = useRef(cart);
-  const modalReturnFocusRef = useRef(null);
-
-  useLayoutEffect(() => {
-    cartRef.current = cart;
-  }, [cart]);
-
-  const filteredProducts = useMemo(
-    () => products.filter((product) => matchesFilters(product, filters)),
-    [filters],
-  );
-
-  const cartItems = products
-    .filter((product) => cart[product.id])
-    .map((product) => ({ ...product, quantity: cart[product.id] }));
-  const cartCount = cartItems.reduce((total, item) => total + item.quantity, 0);
-  const cartTotal = cartItems.reduce((total, item) => total + item.price * item.quantity, 0);
-  const modalOpen = Boolean(selectedProduct) || cartOpen;
-
+function useDialogLifecycle(open, selector, onClose) {
+  const returnFocus = useRef(null);
   useEffect(() => {
-    if (!modalOpen) {
-      return undefined;
-    }
-
-    modalReturnFocusRef.current = document.activeElement;
+    if (!open) return undefined;
+    returnFocus.current = document.activeElement;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.requestAnimationFrame(() => modalReturnFocusRef.current?.focus?.());
+    const frame = requestAnimationFrame(() => document.querySelector(selector)?.querySelector('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')?.focus());
+    const keydown = (event) => {
+      const dialog = document.querySelector(selector);
+      if (event.key === 'Escape') { event.preventDefault(); onClose(); return; }
+      if (event.key !== 'Tab' || !dialog) return;
+      const focusable = [...dialog.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]')];
+      const first = focusable[0], last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     };
-  }, [modalOpen]);
-
-  useEffect(() => {
-    if (!modalOpen) {
-      return undefined;
-    }
-
-    const dialog = document.querySelector(cartOpen ? '.cart-drawer' : '.product-dialog');
-    const focusableSelector = 'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
-    const animationFrame = window.requestAnimationFrame(() => {
-      dialog?.querySelector(focusableSelector)?.focus();
-    });
-
-    function handleKeyDown(event) {
-      if (event.key === 'Escape') {
-        setSelectedProduct(null);
-        setCartOpen(false);
-        return;
-      }
-
-      if (event.key !== 'Tab' || !dialog) {
-        return;
-      }
-
-      const focusable = [...dialog.querySelectorAll(focusableSelector)];
-      const first = focusable[0];
-      const last = focusable.at(-1);
-
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first?.focus();
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      window.cancelAnimationFrame(animationFrame);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [modalOpen, cartOpen, selectedProduct?.id]);
-
-  function flash(message) {
-    setNotice(message);
-    window.setTimeout(() => setNotice(''), 2600);
-  }
-
-  function searchProducts(args = {}) {
-    if (!args || typeof args !== 'object' || Array.isArray(args)) {
-      throw new Error('Tool arguments must be an object.');
-    }
-    if (args.query !== undefined && typeof args.query !== 'string') {
-      throw new Error('query must be a string.');
-    }
-    if (args.inStockOnly !== undefined && typeof args.inStockOnly !== 'boolean') {
-      throw new Error('inStockOnly must be a boolean.');
-    }
-
-    const nextFilters = {
-      query: args.query ?? '',
-      category: args.category ?? 'all',
-      maxPrice: args.maxPrice ?? '',
-      inStockOnly: args.inStockOnly ?? false,
-    };
-
-    if (!categories.some((category) => category.value === nextFilters.category)) {
-      throw new Error(`Unknown category: ${nextFilters.category}`);
-    }
-    if (nextFilters.maxPrice !== '' && (!Number.isFinite(nextFilters.maxPrice) || nextFilters.maxPrice < 0)) {
-      throw new Error('maxPrice must be a non-negative number in Russian rubles.');
-    }
-
-    const matches = products.filter((product) => matchesFilters(product, nextFilters));
-    flushSync(() => setFilters(nextFilters));
-    document.querySelector('#catalog')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    flash(`Агент настроил каталог: найдено ${matches.length}`);
-
-    return {
-      count: matches.length,
-      products: matches.map(({ id, name, category, price, stock, tags }) => ({
-        id,
-        name,
-        category,
-        price,
-        stock,
-        features: tags,
-      })),
-    };
-  }
-
-  function showProduct(args = {}) {
-    if (!args || typeof args !== 'object' || Array.isArray(args)) {
-      throw new Error('Tool arguments must be an object.');
-    }
-
-    const { productId } = args;
-    if (typeof productId !== 'string') {
-      throw new Error('productId must be a string.');
-    }
-
-    const product = products.find((item) => item.id === productId);
-    if (!product) {
-      throw new Error(`Product "${productId}" was not found. Call search_products to get a valid id.`);
-    }
-
-    flushSync(() => {
-      setCartOpen(false);
-      setSelectedProduct(product);
-    });
-    flash(`Открыли ${product.name}`);
-    return {
-      id: product.id,
-      name: product.name,
-      description: product.description,
-      price: product.price,
-      stock: product.stock,
-      features: product.tags,
-    };
-  }
-
-  function addToCart(args = {}) {
-    if (!args || typeof args !== 'object' || Array.isArray(args)) {
-      throw new Error('Tool arguments must be an object.');
-    }
-
-    const { productId, quantity } = args;
-    if (typeof productId !== 'string') {
-      throw new Error('productId must be a string.');
-    }
-
-    const product = products.find((item) => item.id === productId);
-    if (!product) {
-      throw new Error(`Product "${productId}" was not found. Call search_products to get a valid id.`);
-    }
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 5) {
-      throw new Error('quantity must be an integer from 1 to 5.');
-    }
-
-    const currentQuantity = cartRef.current[productId] ?? 0;
-    if (product.stock === 0 || currentQuantity + quantity > product.stock) {
-      throw new Error(`Only ${product.stock} unit(s) of ${product.name} are available; ${currentQuantity} are already in the cart.`);
-    }
-
-    const nextCart = { ...cartRef.current, [productId]: currentQuantity + quantity };
-    cartRef.current = nextCart;
-    flushSync(() => {
-      setCart(nextCart);
-      setSelectedProduct(null);
-      setCartOpen(true);
-    });
-    flash(`${product.name} добавлен в корзину`);
-
-    return {
-      success: true,
-      productId,
-      quantityInCart: nextCart[productId],
-      message: 'The cart was updated and opened for user review. No order was placed.',
-    };
-  }
-
-  const webMcpStatus = useWebMcpTools({ searchProducts, showProduct, addToCart });
-
-  function handleFilterChange(event) {
-    const { name, value, checked, type } = event.target;
-    setFilters((current) => ({ ...current, [name]: type === 'checkbox' ? checked : value }));
-  }
-
-  return (
-    <div className="site-shell">
-      <header className="topbar" inert={modalOpen || undefined}>
-        <a className="brand" href="#top" aria-label="Signal Store, на главную">
-          <span className="brand__signal" aria-hidden="true"><i /><i /><i /></span>
-          <span>SIGNAL<small>/STORE</small></span>
-        </a>
-        <nav aria-label="Основная навигация">
-          <a href="#catalog">Каталог</a>
-          <a href="#principles">Почему мы</a>
-        </nav>
-        <button className="cart-button" type="button" onClick={() => setCartOpen(true)}>
-          Корзина <span>{cartCount}</span>
-        </button>
-      </header>
-
-      <main id="top" inert={modalOpen || undefined}>
-        <section className="hero">
-          <div className="hero__copy">
-            <p className="eyebrow">Техника без белого шума</p>
-            <h1>Выбирайте сигнал.<br /><em>Убирайте лишнее.</em></h1>
-            <p className="hero__lead">
-              Небольшая витрина устройств, которые не требуют сорока вкладок со сравнениями.
-              Теперь каталог понимают и люди, и браузерные агенты.
-            </p>
-            <div className="hero__actions">
-              <a className="primary-action" href="#catalog">Смотреть устройства</a>
-              <span className={`mcp-badge mcp-badge--${webMcpStatus.state}`}>
-                <i /> {webMcpStatus.message}
-              </span>
-            </div>
-          </div>
-          <div className="hero__visual" aria-label="Подборка устройств Signal Store">
-            <div className="hero-card hero-card--back"><ProductArt product={products[2]} /></div>
-            <div className="hero-card hero-card--front"><ProductArt product={products[0]} large /></div>
-            <div className="hero-sticker">6 устройств<br /><strong>0 случайных</strong></div>
-          </div>
-        </section>
-
-        <section className="catalog" id="catalog">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Каталог / 2026</p>
-              <h2>Полезная электроника</h2>
-            </div>
-            <p>{filteredProducts.length} из {products.length} устройств</p>
-          </div>
-
-          <div className="filters" aria-label="Фильтры каталога">
-            <label className="search-field">
-              <span>Поиск</span>
-              <input
-                name="query"
-                value={filters.query}
-                onChange={handleFilterChange}
-                placeholder="Например, OLED или ANC"
-              />
-            </label>
-            <label>
-              <span>Категория</span>
-              <select name="category" value={filters.category} onChange={handleFilterChange}>
-                {categories.map((category) => (
-                  <option value={category.value} key={category.value}>{category.label}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Цена до, ₽</span>
-              <input
-                name="maxPrice"
-                type="number"
-                min="0"
-                value={filters.maxPrice}
-                onChange={handleFilterChange}
-                placeholder="Без лимита"
-              />
-            </label>
-            <label className="check-field">
-              <input
-                name="inStockOnly"
-                type="checkbox"
-                checked={filters.inStockOnly}
-                onChange={handleFilterChange}
-              />
-              <span>Только в наличии</span>
-            </label>
-            <button className="reset-button" type="button" onClick={() => setFilters(initialFilters)}>
-              Сбросить
-            </button>
-          </div>
-
-          <div className="product-grid" aria-live="polite">
-            {filteredProducts.map((product) => (
-              <article className="product-card" key={product.id}>
-                <button
-                  className="product-card__open"
-                  type="button"
-                  onClick={() => showProduct({ productId: product.id })}
-                  aria-label={`Открыть ${product.name}`}
-                >
-                  <ProductArt product={product} />
-                </button>
-                <div className="product-card__meta">
-                  <span>{getCategoryLabel(product.category)}</span>
-                  <span className={product.stock ? '' : 'sold-out'}>
-                    {product.stock ? `В наличии: ${product.stock}` : 'Нет в наличии'}
-                  </span>
-                </div>
-                <h3>{product.name}</h3>
-                <p>{product.description}</p>
-                <div className="product-card__footer">
-                  <strong>{formatPrice(product.price)}</strong>
-                  <button
-                    type="button"
-                    disabled={!product.stock}
-                    onClick={() => addToCart({ productId: product.id, quantity: 1 })}
-                  >
-                    {product.stock ? 'В корзину' : 'Ждём поставку'}
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-
-          {!filteredProducts.length && (
-            <div className="empty-state">
-              <strong>Сигнал потерян</strong>
-              <p>Под такие параметры ничего не нашлось. Ослабьте фильтры.</p>
-            </div>
-          )}
-        </section>
-
-        <section className="principles" id="principles">
-          <p className="eyebrow">Наш короткий манифест</p>
-          <div className="principles__grid">
-            <h2>Меньше выбора.<br />Больше ясности.</h2>
-            <ol>
-              <li><span>01</span>Показываем понятные характеристики, а не облако маркетинга.</li>
-              <li><span>02</span>Не прячем наличие и финальную цену за семью кликами.</li>
-              <li><span>03</span>Любое действие агента сразу видно в том же интерфейсе.</li>
-            </ol>
-          </div>
-        </section>
-      </main>
-
-      <footer inert={modalOpen || undefined}>
-        <span>SIGNAL / STORE</span>
-        <span>Демонстрационный магазин, 2026</span>
-      </footer>
-
-      {selectedProduct && (
-        <div className="overlay" role="presentation" onMouseDown={() => setSelectedProduct(null)}>
-          <section
-            className="product-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="product-dialog-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <button className="close-button" type="button" onClick={() => setSelectedProduct(null)} aria-label="Закрыть">×</button>
-            <ProductArt product={selectedProduct} large />
-            <p className="eyebrow">{getCategoryLabel(selectedProduct.category)}</p>
-            <h2 id="product-dialog-title">{selectedProduct.name}</h2>
-            <p>{selectedProduct.description}</p>
-            <ul>{selectedProduct.tags.map((tag) => <li key={tag}>{tag}</li>)}</ul>
-            <div className="dialog-footer">
-              <strong>{formatPrice(selectedProduct.price)}</strong>
-              <button
-                className="primary-action"
-                type="button"
-                disabled={!selectedProduct.stock}
-                onClick={() => addToCart({ productId: selectedProduct.id, quantity: 1 })}
-              >
-                {selectedProduct.stock ? 'Добавить в корзину' : 'Нет в наличии'}
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
-
-      {cartOpen && (
-        <div className="overlay overlay--cart" role="presentation" onMouseDown={() => setCartOpen(false)}>
-          <aside
-            className="cart-drawer"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="cart-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <button className="close-button" type="button" onClick={() => setCartOpen(false)} aria-label="Закрыть корзину">×</button>
-            <p className="eyebrow">Проверьте перед заказом</p>
-            <h2 id="cart-title">Корзина <sup>{cartCount}</sup></h2>
-            {cartItems.length ? (
-              <>
-                <div className="cart-list">
-                  {cartItems.map((item) => (
-                    <div className="cart-item" key={item.id}>
-                      <ProductArt product={item} />
-                      <div><strong>{item.name}</strong><span>{item.quantity} × {formatPrice(item.price)}</span></div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const nextCart = { ...cartRef.current };
-                          delete nextCart[item.id];
-                          cartRef.current = nextCart;
-                          setCart(nextCart);
-                        }}
-                        aria-label={`Удалить ${item.name}`}
-                      >×</button>
-                    </div>
-                  ))}
-                </div>
-                <div className="cart-total"><span>Итого</span><strong>{formatPrice(cartTotal)}</strong></div>
-                <button className="primary-action checkout-button" type="button" onClick={() => flash('Это демо: деньги спасены')}>
-                  Перейти к оформлению
-                </button>
-              </>
-            ) : <p className="cart-empty">Здесь пока тихо. Добавьте что-нибудь из каталога.</p>}
-          </aside>
-        </div>
-      )}
-
-      {notice && <div className="toast" role="status">{notice}</div>}
-    </div>
-  );
+    document.addEventListener('keydown', keydown);
+    return () => { cancelAnimationFrame(frame); document.removeEventListener('keydown', keydown); document.body.style.overflow = previousOverflow; requestAnimationFrame(() => returnFocus.current?.focus?.()); };
+  }, [open, selector, onClose]);
 }
+
+function ProductDialog({ product, onClose, onSave }) {
+  const [form, setForm] = useState(product || { id: '', name: '', category: 'audio', price: 0, stock: 0, lowStockThreshold: 2, accent: '#a3e635', mark: '', description: '', tags: [] });
+  const [tags, setTags] = useState((product?.tags || []).join(', '));
+  const [saveError, setSaveError] = useState('');
+  const change = (e) => setForm({ ...form, [e.target.name]: e.target.type === 'number' ? Number(e.target.value) : e.target.value });
+  useDialogLifecycle(true, '.edit-dialog', onClose);
+  return <div className="overlay" role="presentation"><form className="edit-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-dialog-title" onSubmit={async (e) => { e.preventDefault(); setSaveError(''); const ok = await onSave({ ...form, tags: tags.split(',').map((x) => x.trim()).filter(Boolean), _isEdit: Boolean(product) }); if (ok === false) setSaveError('Не удалось сохранить товар. Проверьте данные и доступность API.'); }}>
+    <button type="button" className="close-button" onClick={onClose} aria-label="Закрыть редактор">×</button><p className="eyebrow">{product ? 'Редактирование' : 'Новый товар'}</p><h2 id="edit-dialog-title">{product ? product.name : 'Создать товар'}</h2>
+    {saveError && <div className="dialog-error" role="alert">{saveError}</div>}<div className="form-grid">{[['id','ID товара','text'],['name','Название','text'],['price','Цена, ₽','number'],['stock','Физический остаток','number'],['lowStockThreshold','Порог низкого остатка','number'],['mark','Метка','text'],['accent','Цвет карточки','text']].map(([name, label, type]) => <label key={name}>{label}<input name={name} type={type} value={form[name] ?? ''} onChange={change} required={name !== 'mark'} disabled={name === 'id' && !!product} /></label>)}<label>Категория<select name="category" aria-label="Категория товара" value={form.category} onChange={change}>{categories.filter((x) => x.value !== 'all').map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select></label><label className="form-wide">Описание<textarea name="description" value={form.description || ''} onChange={change} required /></label><label className="form-wide">Характеристики <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="ANC, Bluetooth 5.4" /></label></div>
+    <div className="dialog-actions"><button type="button" className="secondary-action" onClick={onClose}>Отмена</button><button className="primary-action">Сохранить черновик</button></div>
+  </form></div>;
+}
+
+function Storefront() {
+  const [products, setProducts] = useState([]), [filters, setFilters] = useState(emptyFilters), [cart, setCart] = useState({}), [selected, setSelected] = useState(null), [cartOpen, setCartOpen] = useState(false), [orders, setOrders] = useState([]), [myOpen, setMyOpen] = useState(false), [ordersLoading, setOrdersLoading] = useState(false), [ordersError, setOrdersError] = useState(''), [busy, setBusy] = useState(false), [dialogError, setDialogError] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('');
+  const [catalogReady, setCatalogReady] = useState(false);
+  useDialogLifecycle(Boolean(selected), '.product-dialog', () => setSelected(null));
+  useEffect(() => { const dialog = document.querySelector('.product-dialog'); if (dialog) { dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-labelledby', 'product-dialog-title'); dialog.querySelector('h2')?.setAttribute('id', 'product-dialog-title'); dialog.querySelector('.close-button')?.setAttribute('aria-label', 'Закрыть товар'); } }, [selected]);
+  useEffect(() => { document.querySelector('#catalog .filters select')?.setAttribute('name', 'category'); }, []);
+  const load = useCallback(() => api.products().then((items) => { setProducts(items); setCatalogReady(true); setError(''); return items; }).catch((e) => { setCatalogReady(false); setError(e.message); return []; }), []);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { window.addEventListener('signal:orders-changed', load); return () => window.removeEventListener('signal:orders-changed', load); }, [load]);
+  const filtered = useMemo(() => products.filter((p) => { const text = [p.id, p.name, p.description, ...(p.tags || [])].join(' ').toLowerCase(); return (!filters.query || text.includes(filters.query.toLowerCase())) && (filters.category === 'all' || p.category === filters.category) && (!filters.maxPrice || p.price <= Number(filters.maxPrice)) && (!filters.inStockOnly || available(p) > 0); }), [products, filters]);
+  const cartItems = products.filter((p) => cart[p.id]).map((p) => ({ ...p, quantity: cart[p.id] })); const count = cartItems.reduce((a, p) => a + p.quantity, 0); const total = cartItems.reduce((a, p) => a + p.quantity * p.price, 0);
+  const flash = (x) => { setNotice(x); setTimeout(() => setNotice(''), 2500); };
+  const add = (p) => { if (available(p) <= (cart[p.id] || 0)) return flash(`Недостаточно доступного остатка для ${p.name}`); setCart({ ...cart, [p.id]: (cart[p.id] || 0) + 1 }); setSelected(null); flash(`${p.name} добавлен в корзину`); };
+  async function checkout() { setBusy(true); setDialogError(''); try { const created = await api.createCart(cartItems.map((x) => ({ productId: x.id, quantity: x.quantity }))); await api.submitCart(created.id); setCart({}); setCartOpen(false); flash('Заказ оформлен — резерв создан'); await load(); } catch (e) { setDialogError(e.message); throw e; } finally { setBusy(false); } }
+  async function loadOrders() { setMyOpen(true); setOrdersLoading(true); setOrdersError(''); try { setOrders(await api.myOrders()); } catch (e) { setOrders([]); setOrdersError(e.message); } finally { setOrdersLoading(false); } }
+  const toolHandlers = { searchProducts: (args = {}) => { if (!catalogReady) throw new Error('Published catalog is still loading. Try again shortly.'); if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Tool arguments must be an object.'); if (args.query !== undefined && typeof args.query !== 'string') throw new Error('query must be a string.'); if (args.category !== undefined && !categories.some((x) => x.value === args.category)) throw new Error(`Unknown category: ${args.category}`); if (args.maxPrice !== undefined && (typeof args.maxPrice !== 'number' || !Number.isFinite(args.maxPrice) || args.maxPrice < 0)) throw new Error('maxPrice must be a non-negative number in Russian rubles.'); if (args.inStockOnly !== undefined && typeof args.inStockOnly !== 'boolean') throw new Error('inStockOnly must be a boolean.'); const next = { ...emptyFilters, ...args }; setFilters(next); const matches = products.filter((p) => (!next.query || [p.name, p.description, ...(p.tags || [])].join(' ').toLowerCase().includes(next.query.toLowerCase())) && (next.category === 'all' || p.category === next.category) && (!next.maxPrice || p.price <= next.maxPrice) && (!next.inStockOnly || available(p) > 0)); return { count: matches.length, products: matches.map(({ id, name, category, price: value, tags }) => ({ id, name, category, price: value, availableStock: available(products.find((item) => item.id === id)), features: tags })) }; }, showProduct: (args = {}) => { if (!catalogReady) throw new Error('Published catalog is still loading. Try again shortly.'); if (!args || typeof args !== 'object' || Array.isArray(args) || typeof args.productId !== 'string') throw new Error('productId must be a string.'); const p = products.find((x) => x.id === args.productId); if (!p) throw new Error(`Product "${args.productId}" was not found in the published catalog.`); setCartOpen(false); setSelected(p); return { id: p.id, name: p.name, description: p.description, price: p.price, stock: available(p), features: p.tags }; }, addToCart: (args = {}) => { if (!catalogReady) throw new Error('Published catalog is still loading. Try again shortly.'); if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Tool arguments must be an object.'); const { productId, quantity } = args; if (typeof productId !== 'string') throw new Error('productId must be a string.'); if (!Number.isInteger(quantity) || quantity < 1 || quantity > 5) throw new Error('quantity must be an integer from 1 to 5.'); const p = products.find((x) => x.id === productId); if (!p || available(p) < (cart[p.id] || 0) + quantity) throw new Error(`Only ${p ? available(p) : 0} unit(s) of ${p?.name || productId} are available; ${cart[p?.id] || 0} are already in the cart.`); setSelected(null); setCart({ ...cart, [productId]: (cart[productId] || 0) + quantity }); setCartOpen(true); return { success: true, productId, quantityInCart: (cart[productId] || 0) + quantity, message: 'The cart was updated and opened for user review. No order was placed.' }; } };
+  const web = useWebMcpTools(toolHandlers);
+  return <div className="site-shell"><Header count={count} onCart={() => setCartOpen(true)} onOrders={loadOrders} /><main id="top"><section className="hero"><div className="hero__copy"><p className="eyebrow">Техника без белого шума</p><h1>Выбирайте сигнал.<br /><em>Убирайте лишнее.</em></h1><p className="hero__lead">Небольшая витрина устройств, которые не требуют сорока вкладок со сравнениями. Каталог понимают и люди, и браузерные агенты.</p><div className="hero__actions"><a className="primary-action" href="#catalog">Смотреть устройства</a><span className={`mcp-badge mcp-badge--${web.state}`}><i /> {web.message}</span></div></div><div className="hero__visual"><div className="hero-card hero-card--back">{products[2] && <ProductArt product={products[2]} />}</div><div className="hero-card hero-card--front">{products[0] && <ProductArt product={products[0]} large />}</div><div className="hero-sticker">{products.length} устройств<br /><strong>из API</strong></div></div></section><section className="catalog" id="catalog"><div className="section-heading"><div><p className="eyebrow">Каталог / 2026</p><h2>Полезная электроника</h2></div><p>{filtered.length} из {products.length} устройств</p></div><div className="filters"><label className="search-field"><span>Поиск</span><input value={filters.query} onChange={(e) => setFilters({ ...filters, query: e.target.value })} placeholder="Например, OLED или ANC" /></label><label><span>Категория</span><select value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })}>{categories.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select></label><label><span>Цена до, ₽</span><input type="number" min="0" value={filters.maxPrice} onChange={(e) => setFilters({ ...filters, maxPrice: e.target.value })} placeholder="Без лимита" /></label><label className="check-field"><input type="checkbox" checked={filters.inStockOnly} onChange={(e) => setFilters({ ...filters, inStockOnly: e.target.checked })} /><span>Только в наличии</span></label><button className="reset-button" onClick={() => setFilters(emptyFilters)}>Сбросить</button></div><ErrorBox error={error} retry={load} />{!products.length && !error ? <Loading /> : <div className="product-grid">{filtered.map((p) => <article className="product-card" key={p.id}><button className="product-card__open" onClick={() => setSelected(p)}><ProductArt product={p} /></button><div className="product-card__meta"><span>{getCategoryLabel(p.category)}</span><span className={available(p) ? '' : 'sold-out'}>{available(p) ? `В наличии: ${available(p)}` : 'Нет в наличии'}</span></div><h3>{p.name}</h3><p>{p.description}</p><div className="product-card__footer"><strong>{price(p.price)}</strong><button disabled={!available(p)} onClick={() => add(p)}>{available(p) ? 'В корзину' : 'Ждём поставку'}</button></div></article>)}</div>}</section><section className="principles"><p className="eyebrow">Наш короткий манифест</p><div className="principles__grid"><h2>Меньше выбора.<br />Больше ясности.</h2><ol><li><span>01</span>Показываем характеристики, а не облако маркетинга.</li><li><span>02</span>Не прячем наличие и цену.</li><li><span>03</span>Любое действие агента видно в интерфейсе.</li></ol></div></section></main><footer><span>SIGNAL / STORE</span><a href="/admin">Панель управления ↗</a></footer>{selected && <div className="overlay" onMouseDown={() => setSelected(null)}><section className="product-dialog" onMouseDown={(e) => e.stopPropagation()}><button className="close-button" onClick={() => setSelected(null)}>×</button><ProductArt product={selected} large /><p className="eyebrow">{getCategoryLabel(selected.category)}</p><h2>{selected.name}</h2><p>{selected.description}</p><ul>{(selected.tags || []).map((x) => <li key={x}>{x}</li>)}</ul><div className="dialog-footer"><strong>{price(selected.price)}</strong><button className="primary-action" disabled={!available(selected)} onClick={() => add(selected)}>Добавить в корзину</button></div></section></div>}{cartOpen && <Cart cartItems={cartItems} count={count} total={total} busy={busy} onClose={() => setCartOpen(false)} onCheckout={checkout} onRemove={(id) => { const next = { ...cart }; delete next[id]; setCart(next); }} />}{myOpen && <OrdersDialog orders={orders} onClose={() => setMyOpen(false)} onCancel={async (id) => { try { await api.orderAction(id, 'cancel'); setOrders(await api.myOrders()); flash('Заказ отменён'); } catch (e) { flash(e.message); } }} />}{notice && <div className="toast">{notice}</div>}</div>;
+}
+
+function Header({ count, onCart, onOrders }) { return <header className="topbar"><a className="brand" href="/"><span className="brand__signal"><i /><i /><i /></span><span>SIGNAL<small>/STORE</small></span></a><nav><a href="#catalog">Каталог</a><a href="#principles">Почему мы</a><button onClick={onOrders}>Мои заказы</button><a href="/admin">Админ ↗</a></nav><button className="cart-button" onClick={onCart}>Корзина <span>{count}</span></button></header>; }
+function Cart({ cartItems, count, total, onClose, onCheckout, onRemove, busy, error }) { const [localError, setLocalError] = useState(''); useDialogLifecycle(true, '.cart-drawer', onClose); const checkout = async () => { setLocalError(''); try { await onCheckout(); } catch (e) { setLocalError(e.message); } }; const visibleError = error || localError; return <div className="overlay overlay--cart" role="presentation"><aside className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="cart-title"><button className="close-button" onClick={onClose} aria-label="Закрыть корзину">×</button><p className="eyebrow">Проверьте перед заказом</p><h2 id="cart-title">Корзина <sup>{count}</sup></h2>{visibleError && <div className="dialog-error" role="alert">{visibleError}</div>}{cartItems.length ? <><div className="cart-list">{cartItems.map((x) => <div className="cart-item" key={x.id}><ProductArt product={x} /><div><strong>{x.name}</strong><span>{x.quantity} × {price(x.price)}</span></div><button onClick={() => onRemove(x.id)} aria-label={`Удалить ${x.name}`}>×</button></div>)}</div><div className="cart-total"><span>Итого</span><strong>{price(total)}</strong></div><button className="primary-action checkout-button" disabled={busy} onClick={checkout}>{busy ? 'Оформляем…' : 'Оформить заказ'}</button></> : <p className="cart-empty">Здесь пока тихо. Добавьте что-нибудь из каталога.</p>}</aside></div>; }
+function OrdersDialog({ orders, onClose, onCancel, loading: externalLoading, error: externalError }) { const [localOrders, setLocalOrders] = useState(orders); const [localLoading, setLocalLoading] = useState(true); const [localError, setLocalError] = useState(''); const [externalDismissed, setExternalDismissed] = useState(false); useDialogLifecycle(true, '.orders-dialog', onClose); const refresh = useCallback(() => { setLocalLoading(true); setLocalError(''); return api.myOrders().then((items) => { setLocalOrders(items); setExternalDismissed(true); }).catch((e) => { setExternalDismissed(false); setLocalError(e.message); }).finally(() => setLocalLoading(false)); }, []); useEffect(() => { refresh(); }, [refresh]); const loading = externalLoading || localLoading; const error = (externalDismissed ? '' : externalError) || localError; return <div className="overlay" role="presentation"><section className="orders-dialog" role="dialog" aria-modal="true" aria-labelledby="orders-title"><button className="close-button" onClick={onClose} aria-label="Закрыть мои заказы">×</button><p className="eyebrow">Локальный пользователь</p><h2 id="orders-title">Мои заказы</h2>{error && <div className="dialog-error" role="alert">{error}<button className="secondary-action" onClick={refresh}>Повторить</button></div>}{loading ? <Loading /> : localOrders.length ? localOrders.map((o) => <article className="order-card" key={o.id}><div><strong>Заказ #{o.id}</strong><span className={`status status--${o.status}`}>{statuses[o.status] || o.status}</span></div><ul>{(o.items || []).map((i) => <li key={i.productId}>{i.name} × {i.quantity}</li>)}</ul><div className="order-footer"><b>{price((o.items || []).reduce((a, i) => a + i.price * i.quantity, 0))}</b>{o.status === 'submitted' && <button className="secondary-action" onClick={async () => { await onCancel(o.id); window.dispatchEvent(new Event('signal:orders-changed')); await refresh(); }}>Отменить заказ</button>}</div></article>) : <p>Оформленных заказов пока нет.</p>}</section></div>; }
+
+function Admin() {
+  const [tab, setTab] = useState('products'), [products, setProducts] = useState([]), [orders, setOrders] = useState([]), [report, setReport] = useState(null), [selected, setSelected] = useState([]), [edit, setEdit] = useState(null), [error, setError] = useState(''), [apiState, setApiState] = useState('checking'), [busy, setBusy] = useState(false), [filters, setFilters] = useState({ query: '', category: 'all', status: 'all', availability: 'all', min: '', max: '' }), [orderFilters, setOrderFilters] = useState({ productId: '', status: '' }), [period, setPeriod] = useState({ from: '2026-01-01', to: '2026-12-31' });
+  const load = useCallback(async () => { try { const result = await api.products(true); setProducts(result); setApiState('ready'); setError(''); return true; } catch (e) { setApiState('error'); setError(e.message); return false; } }, []); const loadOrders = useCallback(async () => { try { const result = await api.orders(orderFilters); setOrders(result); setApiState('ready'); setError(''); return true; } catch (e) { setApiState('error'); setError(e.message); return false; } }, [orderFilters]); useEffect(() => { load(); }, [load]); useEffect(() => { if (tab === 'orders') loadOrders(); }, [tab, loadOrders]);
+  const shown = products.filter((p) => { const t = [p.id, p.name, p.description, ...(p.tags || [])].join(' ').toLowerCase(); return (!filters.query || t.includes(filters.query.toLowerCase())) && (filters.category === 'all' || p.category === filters.category) && (filters.status === 'all' || p.status === filters.status) && (filters.availability === 'all' || (filters.availability === 'low' ? available(p) <= p.lowStockThreshold : available(p) > 0)) && (!filters.min || p.price >= Number(filters.min)) && (!filters.max || p.price <= Number(filters.max)); });
+  async function action(fn) { setBusy(true); try { await fn(); await load(); if (tab === 'orders') await loadOrders(); setSelected([]); return true; } catch (e) { setError(e.message); return false; } finally { setBusy(false); } }
+  async function save(data) { const { _isEdit, id, name, category, price: value, stock, lowStockThreshold, accent, mark, description, tags } = data; const dto = { id, name, category, price: value, stock, lowStockThreshold, accent, mark, description, tags }; const ok = await action(() => _isEdit ? api.updateProduct(id, dto) : api.createProduct(dto)); if (ok) setEdit(null); return ok; }
+  async function loadReport() { setReport(null); setError(''); try { setReport(await api.report(period.from, period.to)); } catch (e) { setError(e.message); } }
+  return <div className="admin-shell"><header className="admin-top"><a className="brand" href="/"><span className="brand__signal"><i /><i /><i /></span>SIGNAL<small>/ OPS</small></a><a href="/">← Витрина</a></header><main className="admin-main"><div className="admin-heading"><div><p className="eyebrow">Операционная панель / 2026</p><h1>Контур магазина</h1></div><span className={`api-pip api-pip--${apiState}`}>{apiState === 'ready' ? '● API доступен' : apiState === 'error' ? '● API недоступен' : '● Проверяем API…'}</span></div><nav className="admin-tabs"><button className={tab === 'products' ? 'active' : ''} onClick={() => setTab('products')}>Каталог <b>{products.length}</b></button><button className={tab === 'orders' ? 'active' : ''} onClick={() => setTab('orders')}>Корзины и заказы</button><button className={tab === 'report' ? 'active' : ''} onClick={() => setTab('report')}>Продажи</button></nav><ErrorBox error={error} retry={tab === 'orders' ? loadOrders : load} />{tab === 'products' && <><div className="metric-row"><div><span>Товаров</span><strong>{products.length}</strong></div><div><span>Физический запас</span><strong>{products.reduce((a, p) => a + p.stock, 0)}</strong></div><div><span>Доступно</span><strong>{products.reduce((a, p) => a + available(p), 0)}</strong></div><button className="primary-action" onClick={() => setEdit({})}>+ Новый товар</button></div><div className="admin-filters"><input placeholder="Поиск по названию, ID, тегам" value={filters.query} onChange={(e) => setFilters({ ...filters, query: e.target.value })} /><select value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })}>{categories.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="all">Все статусы</option>{['draft','published','archived'].map((x) => <option key={x} value={x}>{statuses[x]}</option>)}</select><select value={filters.availability} onChange={(e) => setFilters({ ...filters, availability: e.target.value })}><option value="all">Любой остаток</option><option value="low">Низкий остаток</option><option value="stock">В наличии</option></select><input type="number" placeholder="Цена от" value={filters.min} onChange={(e) => setFilters({ ...filters, min: e.target.value })} /><input type="number" placeholder="Цена до" value={filters.max} onChange={(e) => setFilters({ ...filters, max: e.target.value })} /><button type="button" className="reset-button" onClick={() => setFilters({ query: '', category: 'all', status: 'all', availability: 'all', min: '', max: '' })}>Сбросить фильтры</button></div>{selected.length > 0 && <BulkBar selected={selected} action={action} /> }<div className="table-wrap"><table><thead><tr><th><input type="checkbox" checked={selected.length === shown.length && shown.length > 0} onChange={(e) => setSelected(e.target.checked ? shown.map((p) => p.id) : [])} /></th><th>Товар</th><th>Статус</th><th>Категория</th><th>Цена</th><th>Остаток</th><th /></tr></thead><tbody>{shown.map((p) => <tr key={p.id} className={available(p) <= p.lowStockThreshold ? 'low-row' : ''}><td><input type="checkbox" checked={selected.includes(p.id)} onChange={() => setSelected(selected.includes(p.id) ? selected.filter((x) => x !== p.id) : [...selected, p.id])} /></td><td><strong>{p.name}</strong><small>{p.id}</small></td><td><span className={`status status--${p.status}`}>{statuses[p.status]}</span></td><td>{getCategoryLabel(p.category)}</td><td>{price(p.price)}</td><td><b>{available(p)}</b> <small>/ {p.stock} физ. {available(p) <= p.lowStockThreshold && '· низкий'}</small></td><td className="row-actions"><button onClick={() => setEdit(p)}>Изменить</button>{p.status === 'archived' ? <button onClick={() => action(() => api.productAction(p.id, 'publish'))}>В продажу</button> : <button onClick={() => action(() => api.productAction(p.id, p.status === 'published' ? 'archive' : 'publish'))}>{p.status === 'published' ? 'Архив' : 'Опубликовать'}</button>}</td></tr>)}</tbody></table></div></>}{tab === 'orders' && <OrdersAdmin orders={orders} filters={orderFilters} setFilters={setOrderFilters} products={products} action={action} />} {tab === 'report' && <Report period={period} setPeriod={setPeriod} report={report} onLoad={() => api.report(period.from, period.to).then(setReport).catch((e) => setError(e.message))} />}</main>{edit && <ProductDialog product={edit.id ? edit : null} onClose={() => setEdit(null)} onSave={save} />}</div>;
+}
+function BulkBar({ selected, action }) { const [category, setCategory] = useState('audio'); const [stock, setStock] = useState(''); return <div className="bulkbar"><b>Выбрано: {selected.length}</b><button onClick={() => action(() => api.bulk({ ids: selected, action: 'publish' }))}>Опубликовать</button><button onClick={() => action(() => api.bulk({ ids: selected, action: 'archive' }))}>В архив</button><select value={category} onChange={(e) => setCategory(e.target.value)}>{categories.filter((x) => x.value !== 'all').map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select><button onClick={() => action(() => api.bulk({ ids: selected, action: 'category', category }))}>Категория</button><input aria-label="Новый остаток" type="number" min="0" placeholder="Остаток" value={stock} onChange={(e) => setStock(e.target.value)} /><button disabled={stock === ''} onClick={() => action(() => api.bulk({ ids: selected, action: 'stock', stock: Number(stock) }))}>Остаток</button></div>; }
+function OrdersAdmin({ orders, filters, setFilters, products, action }) { return <section className="admin-section"><div className="admin-section-head"><div><p className="eyebrow">Состояние потока</p><h2>Корзины и заказы</h2></div><span>{orders.length} записей</span></div><div className="admin-filters"><select value={filters.productId} onChange={(e) => setFilters({ ...filters, productId: e.target.value })}><option value="">Все товары</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">Все статусы</option>{Object.keys(statuses).filter((x) => x.includes('cart') || ['abandoned','submitted','completed','cancelled'].includes(x)).map((x) => <option key={x} value={x}>{statuses[x]}</option>)}</select></div><div className="orders-list">{orders.map((o) => <article className="admin-order" key={o.id}><div><strong>#{o.id}</strong><span>{new Date(o.createdAt).toLocaleString('ru-RU')}</span></div><ul>{(o.items || []).map((i) => <li key={i.productId}>{i.name} × {i.quantity} · {price(i.price)}</li>)}</ul><div><span className={`status status--${o.status}`}>{statuses[o.status] || o.status}</span>{o.status === 'submitted' && <><button onClick={() => action(() => api.orderAction(o.id, 'complete'))}>Выполнить</button><button onClick={() => action(() => api.orderAction(o.id, 'cancel'))}>Отменить</button></>}</div></article>)}</div></section>; }
+function Report({ period, setPeriod }) { const [data, setData] = useState(null); const [loading, setLoading] = useState(false); const [error, setError] = useState(''); const run = async () => { setData(null); setError(''); setLoading(true); try { setData(await api.report(period.from, period.to)); } catch (e) { setError(e.message); } finally { setLoading(false); } }; return <section className="report"><div className="admin-section-head"><div><p className="eyebrow">Только выполненные заказы</p><h2>Продажи за период</h2></div><div className="period"><input type="date" value={period.from} onChange={(e) => setPeriod({ ...period, from: e.target.value })} /><span>—</span><input type="date" value={period.to} onChange={(e) => setPeriod({ ...period, to: e.target.value })} /><button className="primary-action" onClick={run} disabled={loading}>{loading ? 'Считаем…' : 'Сформировать'}</button></div></div>{error && <div className="dialog-error" role="alert">{error}<button className="secondary-action" onClick={run}>Повторить</button></div>}{data && <><div className="metric-row report-metrics"><div><span>Выполнено заказов</span><strong>{data.completedOrders ?? data.orderCount ?? 0}</strong></div><div><span>Выручка</span><strong>{price(data.revenue)}</strong></div></div><div className="report-table">{(data.products || data.items || []).map((p) => <div key={p.productId}><span>{p.name}</span><b>{p.quantity} шт.</b><strong>{price(p.revenue ?? p.total)}</strong></div>)}</div></>}</section>; }
+
+export default function App() { return window.location.pathname.startsWith('/admin') ? <Admin /> : <Storefront />; }

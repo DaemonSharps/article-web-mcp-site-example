@@ -5,6 +5,13 @@ const productIdSchema = {
   description: 'Stable product identifier returned by search_products.',
 };
 
+function execute(handlersRef, name, args, options) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    throw new Error('Tool arguments must be an object.');
+  }
+  return handlersRef.current[name](args, options);
+}
+
 function createSearchProductsTool(handlersRef) {
   return {
     name: 'search_products',
@@ -36,7 +43,7 @@ function createSearchProductsTool(handlersRef) {
       readOnlyHint: false,
       untrustedContentHint: false,
     },
-    execute: (args, options) => handlersRef.current.searchProducts(args, options),
+    execute: (args, options) => execute(handlersRef, 'searchProducts', args, options),
   };
 }
 
@@ -53,7 +60,7 @@ function createShowProductTool(handlersRef) {
       readOnlyHint: false,
       untrustedContentHint: false,
     },
-    execute: (args, options) => handlersRef.current.showProduct(args, options),
+    execute: (args, options) => execute(handlersRef, 'showProduct', args, options),
   };
 }
 
@@ -78,7 +85,7 @@ function createAddToCartTool(handlersRef) {
       readOnlyHint: false,
       untrustedContentHint: false,
     },
-    execute: (args, options) => handlersRef.current.addToCart(args, options),
+    execute: (args, options) => execute(handlersRef, 'addToCart', args, options),
   };
 }
 
