@@ -17,4 +17,6 @@ export const api = {
   submitCart: (id) => json(`/carts/${id}/submit`, { method: 'POST' }),
   orderAction: (id, action) => json(`/orders/${id}/${action}`, { method: 'POST' }),
   report: (from, to) => json(`/reports/sales?${new URLSearchParams({ from, to })}`),
+  agentTurn: (body) => json('/agent/turns', { method: 'POST', body: JSON.stringify(body) }),
+  agentDecision: (actionId, body) => json(`/agent/actions/${encodeURIComponent(actionId)}/decision`, { method: 'POST', body: JSON.stringify(body) }),
 };
